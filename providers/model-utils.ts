@@ -1,9 +1,21 @@
-/**
- * Model construction utilities for building and transforming model data.
- */
+import path from "node:path";
 
 import { DEFAULT_COMPAT, DEFAULT_CONTEXT_WINDOW, DEFAULT_COST, DEFAULT_MAX_TOKENS } from "../common/constants";
 import type { ModelData, ModelOverride } from "../common/types";
+
+/**
+ * Slugify a model filename into an ID.
+ * - Takes basename
+ * - Removes extension (e.g., .gguf)
+ * - Lowercases
+ * - Replaces non-alphanumeric with dashes
+ */
+export function slugifyModel(filename: string): string {
+    const base = path.basename(filename);
+    const noExt = base.replace(/\.[^.]+$/, "");
+    const lower = noExt.toLowerCase();
+    return lower.replace(/[^a-z0-9]+/g, "-");
+}
 
 export function parseModelArgs(args: string[]): { contextWindow: number; hasVision: boolean } {
     let contextWindow = DEFAULT_CONTEXT_WINDOW;

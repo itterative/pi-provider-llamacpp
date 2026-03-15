@@ -4,7 +4,7 @@ import { DEFAULT_MODEL_PROPS } from "../common/constants";
 import { errorToString } from "../common/errors";
 import type { LlamacppConfig, ModelData, ModelInfo, ModelProps, ValueOf } from "../common/types";
 
-import { parseModelArgs, createBaseModel, applyModelOverrides } from "./model-utils";
+import { parseModelArgs, createBaseModel, applyModelOverrides, slugifyModel } from "./model-utils";
 import { buildModelOverrides, loadConfig } from "./config";
 import { LlamaCppApi } from "./model-api";
 
@@ -251,7 +251,8 @@ export class ProviderRegistry {
                 // Use defaults
             }
 
-            const modelId = url.pathname.slice(1) || name;
+            // Use model_alias if available, otherwise slugify model_path
+            const modelId = props.modelAlias ?? (props.modelPath ? slugifyModel(props.modelPath) : name);
             const baseModel = createBaseModel(modelId, props.contextWindow, props.hasVision, props.hasReasoning);
             models.push(applyModelOverrides(baseModel, modelOverrides[modelId]));
         }

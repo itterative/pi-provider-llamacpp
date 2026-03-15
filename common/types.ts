@@ -44,6 +44,8 @@ export interface ModelInfo {
 
 // Model properties fetched from server
 export interface ModelProps {
+    modelAlias?: string;
+    modelPath?: string;
     contextWindow: number;
     hasVision: boolean;
     hasReasoning: boolean;

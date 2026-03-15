@@ -67,6 +67,8 @@ export const PROPS_ROUTER_SCHEMA = Type.Object({
 });
 
 export const PROPS_MODEL_SCHEMA = Type.Object({
+    model_alias: Type.Optional(Type.String()),
+    model_path: Type.Optional(Type.String()),
     default_generation_settings: Type.Object({
         n_ctx: Type.Integer(),
     }),

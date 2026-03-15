@@ -88,6 +88,8 @@ export class LlamaCppApi {
         const path = modelId ? `props?model=${encodeURIComponent(modelId)}&autoload=false` : "props";
         const props = await this.fetchWithSchema(path, PROPS_MODEL_SCHEMA);
         return {
+            modelAlias: props.model_alias,
+            modelPath: props.model_path,
             contextWindow: props.default_generation_settings.n_ctx,
             hasVision: props.modalities.vision,
             hasReasoning: props.chat_template_caps.supports_preserve_reasoning,
