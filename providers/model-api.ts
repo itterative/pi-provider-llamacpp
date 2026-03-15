@@ -6,6 +6,7 @@ import type { ModelInfo, ModelProps } from "../common/types";
 import { LlamaCppApiError, LlamaCppNetworkError, LlamaCppSchemaError, parseLlamaCppError } from "../common/errors";
 import { sleep } from "../common/utils";
 
+const HEALTH_TIMEOUT_MS = 1000;
 const MODEL_LOAD_POLL_INTERVAL_MS = 500;
 
 /**
@@ -20,6 +21,22 @@ export class LlamaCppApi {
         apiKey?: string,
     ) {
         this.headers = apiKey ? { "x-api-key": apiKey } : {};
+    }
+
+    /**
+     * Check if the server is healthy and available.
+     * Returns false on any network error or non-200 response.
+     */
+    async checkHealth(): Promise<boolean> {
+        try {
+            const response = await fetch(`${this.baseUrl}/health`, {
+                headers: this.headers,
+                signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+            });
+            return response.ok;
+        } catch {
+            return false;
+        }
     }
 
     /**

@@ -200,6 +200,11 @@ export class ProviderRegistry {
         const api = this.getApi(name);
         if (!api) return false;
 
+        // Check if server is healthy before proceeding
+        if (!(await api.checkHealth())) {
+            return false;
+        }
+
         const url = new URL(provider.baseUrl);
         const models: ModelData[] = [];
         const modelOverrides = buildModelOverrides(provider);
