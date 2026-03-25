@@ -1,10 +1,23 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Loader } from "@mariozechner/pi-tui";
+import { Loader, matchesKey } from "@mariozechner/pi-tui";
 
 import type { ProviderRegistry } from "./registry.js";
+import { timeout } from "../common/utils.js";
 
-export function setupSessionHandler(pi: ExtensionAPI, registry: ProviderRegistry): void {
+const INIT_TIMEOUT_MS = 2000;
+
+export function setupSessionHandler(
+    pi: ExtensionAPI,
+    registry: ProviderRegistry,
+    configError?: { message: string },
+): void {
     pi.on("session_start", async (event, ctx) => {
+        // If config failed to load, notify and exit early
+        if (configError) {
+            ctx.ui.notify(`pi-provider-llamacpp: ${configError.message}`, "warning");
+            return;
+        }
+
         await ctx.ui.custom<void>((tui, theme, _kb, done) => {
             const loader = new Loader(
                 tui,
@@ -14,23 +27,21 @@ export function setupSessionHandler(pi: ExtensionAPI, registry: ProviderRegistry
             );
             loader.start();
 
+            const abortController = new AbortController();
+            const signal = timeout(INIT_TIMEOUT_MS, abortController.signal);
+
             registry
-                .loadConfig()
-                .then(async (result) => {
-                    if (result.error) {
-                        ctx.ui.notify(`pi-provider-llamacpp: ${result.error.message}`, "warning");
-                        done();
-                        return;
-                    }
-
-                    const badProviders = await registry.registerAllProviders();
-
+                .registerAllProviders(signal)
+                .then((badProviders) => {
                     if (badProviders.length > 0) {
                         ctx.ui.notify(
                             `pi-provider-llamacpp: Following providers could not be loaded: ${badProviders.join(", ")}`,
                             "warning",
                         );
                     }
+
+                    // Save cache after refresh (only writes if different)
+                    registry.getModelPropsCache().save();
                     done();
                 })
                 .catch(() => done());
@@ -40,7 +51,8 @@ export function setupSessionHandler(pi: ExtensionAPI, registry: ProviderRegistry
                 invalidate: () => loader.invalidate(),
                 handleInput: (data) => {
                     // Escape cancels the loading
-                    if (data === "\x1b") {
+                    if (matchesKey(data, "escape")) {
+                        abortController.abort();
                         loader.stop();
                         done();
                     }

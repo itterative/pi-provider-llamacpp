@@ -40,6 +40,7 @@ export interface ModelInfo {
     loading: boolean;
     unloading: boolean;
     failed: boolean;
+    sleeping: boolean;
 }
 
 // Model properties fetched from server

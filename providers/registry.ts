@@ -5,29 +5,79 @@ import { errorToString } from "../common/errors";
 import type { LlamacppConfig, ModelData, ModelInfo, ModelProps, ValueOf } from "../common/types";
 
 import { parseModelArgs, createBaseModel, applyModelOverrides, slugifyModel } from "./model-utils";
-import { buildModelOverrides, loadConfig } from "./config";
+import { buildModelOverrides } from "./config";
 import { LlamaCppApi } from "./model-api";
+import { ModelPropsCache, type CachedModelProps } from "./model-props-cache";
 
 export class ProviderRegistry {
-    private config: LlamacppConfig = { providers: {} };
     private apiCache: Map<string, LlamaCppApi> = new Map();
     private routerCache: Map<string, boolean> = new Map();
     private lastRefreshTimes: Map<string, number> = new Map();
     private registeredModels: Map<string, Map<string, ModelProps>> = new Map();
+    private modelPropsCache: ModelPropsCache;
 
-    constructor(private pi: ExtensionAPI) {}
+    constructor(
+        private pi: ExtensionAPI,
+        private config: LlamacppConfig,
+        cache?: ModelPropsCache,
+    ) {
+        this.modelPropsCache = cache ?? new ModelPropsCache();
+    }
 
-    async loadConfig(): Promise<{ error?: { message: string } }> {
-        const result = await loadConfig();
+    getModelPropsCache(): ModelPropsCache {
+        return this.modelPropsCache;
+    }
 
-        if (result.error) {
-            return { error: result.error };
+    /**
+     * Register providers from cache without hitting the API.
+     * Called on extension init to make models available immediately.
+     * Also populates registeredModels for needsRefresh() comparisons.
+     */
+    registerCachedProviders(): void {
+        for (const [providerName, entry] of Object.entries(this.modelPropsCache.getCache())) {
+            const provider = this.config.providers[providerName];
+            if (!provider) continue;
+
+            const models: ModelData[] = [];
+            const modelPropsMap = new Map<string, ModelProps>();
+
+            for (const [modelId, props] of Object.entries(entry.models)) {
+                const baseModel = createBaseModel(modelId, props.contextWindow, props.hasVision, props.hasReasoning);
+                models.push(baseModel);
+
+                // Also populate registeredModels for needsRefresh()
+                modelPropsMap.set(modelId, {
+                    contextWindow: props.contextWindow,
+                    hasVision: props.hasVision,
+                    hasReasoning: props.hasReasoning,
+                });
+            }
+
+            if (models.length === 0) continue;
+
+            const url = new URL(provider.baseUrl);
+            const api = new LlamaCppApi(url.origin, provider.apiKey);
+
+            this.pi.registerProvider(providerName, {
+                baseUrl: url.origin,
+                apiKey: provider.apiKey,
+                api: "openai-completions",
+                headers: api["headers"],
+                models: models.map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                    reasoning: m.reasoning,
+                    input: m.input,
+                    contextWindow: m.contextWindow,
+                    maxTokens: m.maxTokens,
+                    cost: m.cost,
+                    compat: m.compat,
+                })),
+            });
+
+            // Store in registeredModels for needsRefresh() comparisons
+            this.registeredModels.set(providerName, modelPropsMap);
         }
-
-        this.config = result.config;
-        this.apiCache.clear();
-        this.routerCache.clear();
-        return {};
     }
 
     getConfig(): LlamacppConfig {
@@ -79,7 +129,7 @@ export class ProviderRegistry {
         if (!api) return false;
 
         try {
-            const isRouter = await api.checkIfRouter();
+            const isRouter = await api.isInRouterMode();
             this.routerCache.set(providerName, isRouter);
             return isRouter;
         } catch {
@@ -193,7 +243,7 @@ export class ProviderRegistry {
         }
     }
 
-    async registerProvider(name: string): Promise<boolean> {
+    async registerProvider(name: string, signal?: AbortSignal): Promise<boolean> {
         const provider = this.config.providers[name];
         if (!provider) return false;
 
@@ -201,7 +251,7 @@ export class ProviderRegistry {
         if (!api) return false;
 
         // Check if server is healthy before proceeding
-        if (!(await api.checkHealth())) {
+        if (!(await api.isHealthy())) {
             return false;
         }
 
@@ -219,7 +269,7 @@ export class ProviderRegistry {
 
         if (isRouter) {
             // Fetch list of models from router
-            const modelsResponse = await api.fetchModelsRaw();
+            const modelsResponse = await api.fetchModelsRaw(signal);
 
             for (const model of modelsResponse.data) {
                 // Skip entries without a model path
@@ -278,28 +328,36 @@ export class ProviderRegistry {
             })),
         });
 
-        // Cache model info for stale detection
-        const modelCache = new Map<string, ModelProps>();
+        // Cache model info for stale detection and persistent cache
+        const modelPropsMap = new Map<string, ModelProps>();
+        const cachedPropsMap = new Map<string, CachedModelProps>();
+
         for (const model of models) {
-            modelCache.set(model.id, {
+            const props: ModelProps = {
                 contextWindow: model.contextWindow,
                 hasVision: model.input.includes("image"),
                 hasReasoning: model.reasoning,
-            });
+            };
+            modelPropsMap.set(model.id, props);
+            cachedPropsMap.set(model.id, props);
         }
-        this.registeredModels.set(name, modelCache);
+
+        // Update registeredModels (for needsRefresh comparisons)
+        this.registeredModels.set(name, modelPropsMap);
+        // Update persistent cache
+        this.modelPropsCache.updateProviderModels(name, cachedPropsMap);
         this.lastRefreshTimes.set(name, Date.now());
 
         return true;
     }
 
-    async registerAllProviders(): Promise<string[]> {
+    async registerAllProviders(signal?: AbortSignal): Promise<string[]> {
         const badProviders: string[] = [];
 
         const registerOne = async (name: string) => {
             let ok = false;
             try {
-                ok = await this.registerProvider(name);
+                ok = await this.registerProvider(name, signal);
             } catch {
                 // pass
             }

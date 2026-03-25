@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import fs from "node:fs/promises";
+import fs from "node:fs";
 
 import Schema, { ParseError } from "typebox/schema";
 
@@ -15,12 +15,12 @@ export interface LoadConfigResult {
     error?: { message: string };
 }
 
-export async function loadConfig(): Promise<LoadConfigResult> {
+export function loadConfigSync(): LoadConfigResult {
     const emptyConfig: LlamacppConfig = { providers: {} };
 
     let data: unknown;
     try {
-        data = JSON.parse(await fs.readFile(CONFIG_PATH, { encoding: "utf8" }));
+        data = JSON.parse(fs.readFileSync(CONFIG_PATH, { encoding: "utf8" }));
     } catch (e) {
         return {
             config: emptyConfig,

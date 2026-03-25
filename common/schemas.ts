@@ -91,7 +91,7 @@ export const MODELS_SCHEMA = Type.Object({
         Type.Object({
             id: Type.String(),
             status: Type.Object({
-                value: Type.Enum(["loaded", "unloaded", "loading", "failed"]),
+                value: Type.Enum(["loaded", "unloaded", "loading", "failed", "sleeping"]),
                 args: Type.Array(Type.String()),
             }),
         }),

@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 
 import { modelManager } from "../components/model-manager";
 import type { ProviderRegistry } from "../providers/registry";
-import { loadAndRefresh, unloadAndWait } from "../providers/model-operations";
+import { ModelOperations } from "../providers/model-operations";
 
 export function registerModelManagerCommand(pi: ExtensionAPI, registry: ProviderRegistry) {
     pi.registerCommand("llamacpp", {
@@ -67,7 +67,14 @@ async function showModelsMenu(
     pi: ExtensionAPI,
     registry: ProviderRegistry,
     providerName: string,
-    initialModels: { id: string; loaded: boolean; loading: boolean; unloading: boolean; failed: boolean }[],
+    initialModels: {
+        id: string;
+        loaded: boolean;
+        loading: boolean;
+        unloading: boolean;
+        failed: boolean;
+        sleeping: boolean;
+    }[],
     ctx: ExtensionContext,
 ): Promise<void> {
     const api = registry.getApi(providerName);
@@ -75,7 +82,8 @@ async function showModelsMenu(
 
     let models = initialModels;
 
-    const notify = (msg: string, level: "info" | "error" | "warning") => ctx.ui.notify(msg, level);
+    // Create ModelOperations instance
+    const modelOps = new ModelOperations(registry, ctx);
 
     while (true) {
         const result = await modelManager(
@@ -84,13 +92,13 @@ async function showModelsMenu(
                 models,
                 onAction: async (action, modelId, updateModels) => {
                     if (action === "load") {
-                        return await loadAndRefresh(registry, providerName, modelId, api, notify);
+                        return await modelOps.loadAndRefresh(providerName, modelId, api);
                     } else {
                         // Mark as unloading for visual feedback
-                        models = models.map((m) => (m.id === modelId ? { ...m, unloading: true } : m));
+                        models = models.map((m) => (m.id === modelId ? { ...m, unloading: true, sleeping: false } : m));
                         updateModels(models);
 
-                        return await unloadAndWait(registry, providerName, modelId, api, notify, updateModels);
+                        return await modelOps.unloadAndWait(providerName, modelId, api, updateModels);
                     }
                 },
                 onSetModel: async (modelId: string) => {
@@ -100,11 +108,11 @@ async function showModelsMenu(
                     if (targetModel) {
                         const success = await pi.setModel(targetModel);
                         if (success) {
-                            notify(`Switched to model "${modelId}"`, "info");
+                            ctx.ui.notify(`Switched to model "${modelId}"`, "info");
                         }
                         return success;
                     }
-                    notify(`Model "${modelId}" not found in registry`, "error");
+                    ctx.ui.notify(`Model "${modelId}" not found in registry`, "error");
                     return false;
                 },
             },

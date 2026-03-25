@@ -4,8 +4,9 @@ import Schema from "typebox/schema";
 import { PROPS_MODEL_SCHEMA, PROPS_ROUTER_SCHEMA, MODELS_SCHEMA } from "../common/schemas";
 import type { ModelInfo, ModelProps } from "../common/types";
 import { LlamaCppApiError, LlamaCppNetworkError, LlamaCppSchemaError, parseLlamaCppError } from "../common/errors";
-import { sleep } from "../common/utils";
+import { sleep, timeout } from "../common/utils";
 
+const DEFAULT_TIMEOUTS_MS = 2000;
 const HEALTH_TIMEOUT_MS = 1000;
 const MODEL_LOAD_POLL_INTERVAL_MS = 500;
 
@@ -27,12 +28,15 @@ export class LlamaCppApi {
      * Check if the server is healthy and available.
      * Returns false on any network error or non-200 response.
      */
-    async checkHealth(): Promise<boolean> {
+    async isHealthy(signal?: AbortSignal): Promise<boolean> {
+        signal = signal ?? AbortSignal.timeout(HEALTH_TIMEOUT_MS);
+
         try {
             const response = await fetch(`${this.baseUrl}/health`, {
                 headers: this.headers,
-                signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+                signal: signal,
             });
+
             return response.ok;
         } catch {
             return false;
@@ -43,9 +47,13 @@ export class LlamaCppApi {
      * Check if the server is a router (multi-model) instance.
      * @throws LlamaCppNetworkError on network failures
      */
-    async checkIfRouter(): Promise<boolean> {
+    async isInRouterMode(signal?: AbortSignal): Promise<boolean> {
         try {
-            const props = await this.fetchWithSchema("props", PROPS_ROUTER_SCHEMA, 2000);
+            const props = await this.fetch("props", {
+                signal: timeout(DEFAULT_TIMEOUTS_MS, signal),
+                schema: PROPS_ROUTER_SCHEMA,
+            });
+
             return props.role === "router";
         } catch (e) {
             if (e instanceof Error && e.name === "AbortError") throw e;
@@ -57,24 +65,23 @@ export class LlamaCppApi {
      * Fetch list of models with their status.
      * Returns empty array on error (non-critical operation).
      */
-    async fetchModels(): Promise<ModelInfo[]> {
+    async fetchModels(signal?: AbortSignal): Promise<ModelInfo[]> {
         try {
-            const response = await fetch(`${this.baseUrl}/models`, { headers: this.headers });
-            if (response.ok) {
-                const data = Schema.Parse(MODELS_SCHEMA, await response.json());
-                return data.data
-                    .filter((m) => m.status.args.includes("--model") || m.status.args.includes("-m"))
-                    .map((m) => ({
-                        id: m.id,
-                        loaded: m.status.value === "loaded",
-                        loading: m.status.value === "loading",
-                        unloading: false,
-                        failed: m.status.value === "failed",
-                    }));
-            }
+            const models = await this.fetch("models", { signal, schema: MODELS_SCHEMA });
+            return models.data
+                .filter((m) => m.status.args.includes("--model") || m.status.args.includes("-m"))
+                .map((m) => ({
+                    id: m.id,
+                    loaded: m.status.value === "loaded",
+                    loading: m.status.value === "loading",
+                    unloading: false,
+                    failed: m.status.value === "failed",
+                    sleeping: m.status.value === "sleeping",
+                }));
         } catch {
             // Ignore errors - model list is not critical
         }
+
         return [];
     }
 
@@ -84,9 +91,10 @@ export class LlamaCppApi {
      * @throws LlamaCppNetworkError on network failures
      * @throws LlamaCppSchemaError on schema validation failures
      */
-    async fetchProps(modelId?: string): Promise<ModelProps> {
+    async fetchProps(modelId?: string, signal?: AbortSignal): Promise<ModelProps> {
         const path = modelId ? `props?model=${encodeURIComponent(modelId)}&autoload=false` : "props";
-        const props = await this.fetchWithSchema(path, PROPS_MODEL_SCHEMA);
+        const props = await this.fetch(path, { signal, schema: PROPS_MODEL_SCHEMA });
+
         return {
             modelAlias: props.model_alias,
             modelPath: props.model_path,
@@ -104,25 +112,7 @@ export class LlamaCppApi {
      * @throws LlamaCppApiError if the server rejects the load request
      */
     async loadModel(modelId: string, signal?: AbortSignal): Promise<boolean> {
-        const response = await fetch(`${this.baseUrl}/models/load`, {
-            method: "POST",
-            headers: { ...this.headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: modelId }),
-            signal,
-        });
-
-        const data = await response.json();
-
-        // Check for llama.cpp error response format
-        const error = parseLlamaCppError(data);
-        if (error) {
-            throw error;
-        }
-
-        if (!response.ok) {
-            throw new LlamaCppApiError(`Failed to load model: ${JSON.stringify(data)}`);
-        }
-
+        await this.fetch("models/load", { method: "POST", body: { model: modelId }, signal });
         return this.waitForModelLoad(modelId, signal);
     }
 
@@ -134,24 +124,7 @@ export class LlamaCppApi {
      * @throws LlamaCppApiError if the server rejects the unload request
      */
     async unloadModel(modelId: string): Promise<boolean> {
-        const response = await fetch(`${this.baseUrl}/models/unload`, {
-            method: "POST",
-            headers: { ...this.headers, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: modelId }),
-        });
-
-        const data = await response.json();
-
-        // Check for llama.cpp error response format
-        const error = parseLlamaCppError(data);
-        if (error) {
-            throw error;
-        }
-
-        if (!response.ok) {
-            throw new LlamaCppApiError(`Failed to unload model: ${JSON.stringify(data)}`);
-        }
-
+        await this.fetch("models/unload", { method: "POST", body: { model: modelId } });
         return true;
     }
 
@@ -159,8 +132,8 @@ export class LlamaCppApi {
      * Fetch raw models data with schema validation.
      * Used by registerProvider to get full model details.
      */
-    async fetchModelsRaw(): Promise<Type.Static<typeof MODELS_SCHEMA>> {
-        return this.fetchWithSchema("models", MODELS_SCHEMA);
+    async fetchModelsRaw(signal?: AbortSignal): Promise<Type.Static<typeof MODELS_SCHEMA>> {
+        return this.fetch("models", { signal, schema: MODELS_SCHEMA });
     }
 
     private async waitForModelLoad(modelId: string, signal?: AbortSignal): Promise<boolean> {
@@ -186,43 +159,48 @@ export class LlamaCppApi {
         return false;
     }
 
-    private async fetchWithSchema<T extends Type.TSchema>(
+    private async fetch<T extends Type.TSchema>(
         path: string,
-        schema: T,
-        timeoutMs?: number,
+        options?: {
+            method?: "GET" | "POST";
+            body?: unknown;
+            signal?: AbortSignal;
+            schema?: T;
+        },
     ): Promise<Type.Static<T>> {
-        const controller = new AbortController();
-        const timeout = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+        const { method = "GET", body, signal, schema } = options ?? {};
 
         try {
             const response = await fetch(`${this.baseUrl}/${path}`, {
-                headers: this.headers,
-                signal: controller.signal,
+                method,
+                headers: method === "POST" ? { ...this.headers, "Content-Type": "application/json" } : this.headers,
+                body: body ? JSON.stringify(body) : undefined,
+                signal,
             });
 
             const data = await response.json();
 
-            // Check for llama.cpp error response format
             const error = parseLlamaCppError(data);
-            if (error) {
-                throw error;
-            }
+            if (error) throw error;
 
-            if (response.status !== 200) {
+            if (!response.ok) {
                 throw new LlamaCppNetworkError(`Returned status ${response.status}`);
             }
 
-            try {
-                return Schema.Parse(schema, data) as Type.Static<T>;
-            } catch (e) {
-                throw new LlamaCppSchemaError("Schema validation failed", e);
+            if (schema) {
+                try {
+                    return Schema.Parse(schema, data) as Type.Static<T>;
+                } catch (e) {
+                    throw new LlamaCppSchemaError("Schema validation failed", e);
+                }
             }
+
+            return data;
         } catch (e) {
             if (e instanceof LlamaCppApiError) throw e;
+            if (e instanceof LlamaCppSchemaError) throw e;
             if (e instanceof Error && e.name === "AbortError") throw e;
             throw new LlamaCppNetworkError(`Network error: ${e instanceof Error ? e.message : String(e)}`, e);
-        } finally {
-            if (timeout) clearTimeout(timeout);
         }
     }
 }
