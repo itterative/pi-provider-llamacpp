@@ -1,5 +1,5 @@
 import Type from "typebox";
-import Schema from "typebox/schema";
+import { Parse as SchemaParse } from "typebox/value";
 
 import { PROPS_MODEL_SCHEMA, PROPS_ROUTER_SCHEMA, MODELS_SCHEMA } from "../common/schemas";
 import type { ModelInfo, ModelProps } from "../common/types";
@@ -189,7 +189,7 @@ export class LlamaCppApi {
 
             if (schema) {
                 try {
-                    return Schema.Parse(schema, data) as Type.Static<T>;
+                    return SchemaParse(schema, data) as Type.Static<T>;
                 } catch (e) {
                     throw new LlamaCppSchemaError("Schema validation failed", e);
                 }

@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
-import Schema, { ParseError } from "typebox/schema";
+import { Parse as SchemaParse, ParseError } from "typebox/value";
 
 import { CONFIG_SCHEMA } from "../common/schemas";
 import { errorToString } from "../common/errors";
@@ -29,11 +29,11 @@ export function loadConfigSync(): LoadConfigResult {
     }
 
     try {
-        const config = Schema.Parse(CONFIG_SCHEMA, data);
+        const config = SchemaParse(CONFIG_SCHEMA, data);
         return { config };
     } catch (e) {
         if (e instanceof ParseError) {
-            const errors = e.errors.map((e) => `  ${e.schemaPath}: ${e.message}`).join("\n");
+            const errors = e.cause.errors.map((e) => `  ${e.schemaPath}: ${e.message}`).join("\n");
             return {
                 config: emptyConfig,
                 error: { message: `Config is invalid\n${errors}` },
