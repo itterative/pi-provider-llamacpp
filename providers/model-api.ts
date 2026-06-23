@@ -3,6 +3,7 @@ import { Parse as SchemaParse } from "typebox/value";
 
 import { PROPS_MODEL_SCHEMA, PROPS_ROUTER_SCHEMA, MODELS_SCHEMA } from "../common/schemas";
 import type { ModelInfo, ModelProps } from "../common/types";
+import { hasModelSource } from "./model-utils";
 import { LlamaCppApiError, LlamaCppNetworkError, LlamaCppSchemaError, parseLlamaCppError } from "../common/errors";
 import { sleep, timeout } from "../common/utils";
 
@@ -69,7 +70,7 @@ export class LlamaCppApi {
         try {
             const models = await this.fetch("models", { signal, schema: MODELS_SCHEMA });
             return models.data
-                .filter((m) => m.status.args.includes("--model") || m.status.args.includes("-m"))
+                .filter((m) => hasModelSource(m.status.args))
                 .map((m) => ({
                     id: m.id,
                     loaded: m.status.value === "loaded",

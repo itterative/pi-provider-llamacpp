@@ -4,7 +4,7 @@ import { DEFAULT_MODEL_PROPS } from "../common/constants";
 import { errorToString } from "../common/errors";
 import type { LlamacppConfig, ModelData, ModelInfo, ModelProps, ValueOf } from "../common/types";
 
-import { parseModelArgs, createBaseModel, applyModelOverrides, slugifyModel } from "./model-utils";
+import { parseModelArgs, createBaseModel, applyModelOverrides, hasModelSource, slugifyModel } from "./model-utils";
 import { buildModelOverrides } from "./config";
 import { LlamaCppApi } from "./model-api";
 import { ModelPropsCache, type CachedModelProps } from "./model-props-cache";
@@ -272,8 +272,8 @@ export class ProviderRegistry {
             const modelsResponse = await api.fetchModelsRaw(signal);
 
             for (const model of modelsResponse.data) {
-                // Skip entries without a model path
-                if (!model.status.args.includes("--model") && !model.status.args.includes("-m")) {
+                // Skip entries without a model source (e.g. the empty "default" slot)
+                if (!hasModelSource(model.status.args)) {
                     continue;
                 }
 

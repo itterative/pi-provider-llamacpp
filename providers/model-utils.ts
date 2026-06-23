@@ -4,6 +4,20 @@ import { DEFAULT_COMPAT, DEFAULT_CONTEXT_WINDOW, DEFAULT_COST, DEFAULT_MAX_TOKEN
 import type { ModelData, ModelOverride } from "../common/types";
 
 /**
+ * Model-source flags llama.cpp accepts as the input for a preset.
+ * An entry without any of these is an empty slot (e.g. the default), not a loadable model.
+ */
+const MODEL_SOURCE_FLAGS = new Set(["--model", "-m", "--hf-repo", "--model-url", "-mu"]);
+
+/**
+ * True when the args for a `/v1/models` entry point at an actual model
+ * (local file, HuggingFace repo, or remote URL) rather than an empty default slot.
+ */
+export function hasModelSource(args: string[]): boolean {
+    return args.some((arg) => MODEL_SOURCE_FLAGS.has(arg));
+}
+
+/**
  * Slugify a model filename into an ID.
  * - Takes basename
  * - Removes extension (e.g., .gguf)
