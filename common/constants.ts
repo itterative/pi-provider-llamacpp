@@ -1,7 +1,7 @@
 import { Compat, Cost, ModelProps } from "./types";
 
 export const DEFAULT_CONTEXT_WINDOW = 128000;
-export const DEFAULT_MAX_TOKENS = 16384;
+export const DEFAULT_MAX_TOKENS = DEFAULT_CONTEXT_WINDOW;
 
 export const DEFAULT_COST: Cost = {
     input: 0,
